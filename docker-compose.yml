@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  trialsetu:
+    build: .
+    container_name: trialsetu-ctms
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DATABASE_PATH=/app/data/trialsetu.sqlite
+      - JWT_SECRET=trialsetu-aiia-sih-ps26046-secure-secret-key-2026
+    volumes:
+      - trialsetu_data:/app/data
+    networks:
+      - trialsetu_net
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    container_name: trialsetu-n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=http://localhost:5678/
+      - GENERIC_TIMEZONE=Asia/Kolkata
+    volumes:
+      - n8n_data:/home/node/.n8n
+    networks:
+      - trialsetu_net
+    depends_on:
+      - trialsetu
+
+volumes:
+  trialsetu_data:
+  n8n_data:
+
+networks:
+  trialsetu_net:
+    driver: bridge

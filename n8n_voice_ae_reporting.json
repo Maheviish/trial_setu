@@ -1,0 +1,217 @@
+{
+  "name": "TrialSetu - Voice-Based Adverse Event (AE) Ingestion & PV Paging",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "trialsetu-voice-ae-intake",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "1",
+      "name": "Webhook: Voice/Field Intake",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.body.audio_url || '' }}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        }
+      },
+      "id": "2",
+      "name": "Has Audio URL?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "operation": "transcribe",
+        "options": {
+          "language": "en"
+        }
+      },
+      "id": "3",
+      "name": "Whisper Speech-to-Text",
+      "type": "@n8n/n8n-nodes-langchain.openAiAudio",
+      "typeVersion": 1,
+      "position": [680, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:3000/api/code-suggest",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": \"{{ $node['Has Audio URL?'].json.body.transcript || $node['Whisper Speech-to-Text'].json.text }}\"\n}",
+        "options": {}
+      },
+      "id": "4",
+      "name": "TrialSetu Live MedDRA Auto-Coder",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.is_serious }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "5",
+      "name": "Is Serious SAE (24h Clock)?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "-10029384729",
+        "text": "=🚨 *URGENT 24-HR CDSCO SAE ALERT — AIIA NPvCC*\n\n*Study Protocol:* {{ $('Webhook: Voice/Field Intake').item.json.body.study_id || 'AIIA-GUDU-03' }}\n*Participant:* {{ $('Webhook: Voice/Field Intake').item.json.body.participant_id || 'PT-GUDU-201' }}\n*MedDRA PT:* {{ $json.meddra_code }} - {{ $json.meddra_label }}\n*WHODrug:* {{ $json.whodrug_code }} ({{ $json.whodrug_name }})\n*Symptom:* {{ $('Webhook: Voice/Field Intake').item.json.body.transcript || $node['Whisper Speech-to-Text'].json.text }}\n*Statutory Deadline:* {{ $json.report_deadline }}\n\n*Action Required:* On-Call PV Officer (Dr. Shalini Deshmukh) must initiate CDSCO Form 44 expedited report immediately.",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "6",
+      "name": "Emergency PV On-Call Page (Telegram/SMS)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1360, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:3000/api/adverse-events",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"study_id\": \"{{ $('Webhook: Voice/Field Intake').item.json.body.study_id || 'AIIA-GUDU-03' }}\",\n  \"participant_id\": \"{{ $('Webhook: Voice/Field Intake').item.json.body.participant_id || 'PT-GUDU-201' }}\",\n  \"description\": \"{{ $('Webhook: Voice/Field Intake').item.json.body.transcript || $node['Whisper Speech-to-Text'].json.text }}\",\n  \"severity\": \"{{ $('TrialSetu Live MedDRA Auto-Coder').item.json.severity }}\",\n  \"meddra_code\": \"{{ $('TrialSetu Live MedDRA Auto-Coder').item.json.meddra_code }}\",\n  \"meddra_label\": \"{{ $('TrialSetu Live MedDRA Auto-Coder').item.json.meddra_label }}\",\n  \"whodrug_code\": \"{{ $('TrialSetu Live MedDRA Auto-Coder').item.json.whodrug_code }}\",\n  \"source\": \"voice_report\"\n}",
+        "options": {}
+      },
+      "id": "7",
+      "name": "Commit AE to TrialSetu DB & SSE Stream",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1600, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"status\": \"success\",\n  \"ae_reference\": \"{{ $json.adverse_event.id }}\",\n  \"study_id\": \"{{ $json.adverse_event.study_id }}\",\n  \"meddra_label\": \"{{ $json.adverse_event.meddra_label }}\",\n  \"severity\": \"{{ $json.adverse_event.severity }}\",\n  \"pv_on_call_paged\": {{ $json.adverse_event.severity === 'serious' }},\n  \"regulatory_deadline\": \"{{ $json.adverse_event.report_deadline }}\",\n  \"confirmation_message\": \"Your adverse event report has been securely registered in TrialSetu CTMS under ALCOA+ compliance. The National Pharmacovigilance Coordination Centre has been alerted.\"\n}",
+        "options": {}
+      },
+      "id": "8",
+      "name": "Respond with Receipt & CDSCO Ref",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1820, 300]
+    }
+  ],
+  "connections": {
+    "Webhook: Voice/Field Intake": {
+      "main": [
+        [
+          {
+            "node": "Has Audio URL?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Audio URL?": {
+      "main": [
+        [
+          {
+            "node": "Whisper Speech-to-Text",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "TrialSetu Live MedDRA Auto-Coder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Whisper Speech-to-Text": {
+      "main": [
+        [
+          {
+            "node": "TrialSetu Live MedDRA Auto-Coder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TrialSetu Live MedDRA Auto-Coder": {
+      "main": [
+        [
+          {
+            "node": "Is Serious SAE (24h Clock)?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Serious SAE (24h Clock)?": {
+      "main": [
+        [
+          {
+            "node": "Emergency PV On-Call Page (Telegram/SMS)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Commit AE to TrialSetu DB & SSE Stream",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Emergency PV On-Call Page (Telegram/SMS)": {
+      "main": [
+        [
+          {
+            "node": "Commit AE to TrialSetu DB & SSE Stream",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Commit AE to TrialSetu DB & SSE Stream": {
+      "main": [
+        [
+          {
+            "node": "Respond with Receipt & CDSCO Ref",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
